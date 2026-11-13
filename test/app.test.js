@@ -341,7 +341,7 @@ test('every new line gets a permanent link page', async () => {
     assert.match(cur, /just now/);
 
     const home = await (await fetch(base + '/')).text();
-    assert.ok(home.includes(`href="${second.link}"`), 'home links the current line');
+    assert.match(home, /id="share-btn"/);
     assert.equal((await (await fetch(base + '/api/line')).json()).slug, second.link.slice(3));
 
     assert.equal((await fetch(base + '/l/doesnotexist')).status, 404);

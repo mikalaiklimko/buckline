@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
 </head>
-<body data-max-length="{{MAX_LENGTH}}" data-demo="{{DEMO}}">
+<body data-max-length="{{MAX_LENGTH}}" data-demo="{{DEMO}}" data-price="{{PRICE}}">
   <div class="page">
     <header class="header">
       <a class="logo" href="/" aria-label="OneBuckLine home">OneBuck<span>Line</span></a>
@@ -28,7 +28,13 @@
     <main class="hero">
       <p class="eyebrow">The line right now</p>
       <h1 class="line" id="line" aria-live="polite">{{TEXT}}</h1>
-      <p class="permalink-row"><a class="permalink" id="permalink" href="{{LINK}}" {{LINK_HIDDEN}}>Link to this line</a></p>
+      <div class="share-row">
+        <button class="share-btn" id="share-btn" type="button" hidden>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>
+          <span>Share your line</span>
+        </button>
+        <span class="share-note" id="share-note" role="status"></span>
+      </div>
 
       <div class="actions">
         <div id="cta" class="stack">
@@ -54,7 +60,6 @@
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#4ADE80" stroke-width="2.5" aria-hidden="true"><path d="M4 10.5l4 4 8-9"/></svg>
             <span id="paid-msg">The line is yours. For now.</span>
           </div>
-          <p class="small muted" id="share" hidden>Your line's link: <a id="share-link" href="#"></a></p>
           <button class="btn btn-link" id="again-btn" type="button">Change it again — {{PRICE}}</button>
         </div>
       </div>

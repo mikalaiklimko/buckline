@@ -205,11 +205,9 @@ function createApp(overrides = {}) {
   }
 
   function renderIndex() {
-    const { text, slug } = store.get();
+    const { text } = store.get();
     return indexTemplate
       .replaceAll('{{TEXT}}', escapeHtml(text))
-      .replaceAll('{{LINK}}', slug ? `/l/${encodeURIComponent(slug)}` : '')
-      .replaceAll('{{LINK_HIDDEN}}', slug ? '' : 'hidden')
       .replaceAll('{{PRICE}}', escapeHtml(formatPrice()))
       .replaceAll('{{MAX_LENGTH}}', String(config.maxLength))
       .replaceAll('{{DEMO}}', config.demoMode ? 'true' : 'false');

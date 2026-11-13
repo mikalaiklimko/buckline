@@ -41,24 +41,62 @@
     formError.textContent = '';
   }
 
-  const permalink = $('permalink');
-  const share = $('share');
-  const shareLink = $('share-link');
+  const shareBtn = $('share-btn');
+  const shareNote = $('share-note');
+  const price = document.body.dataset.price || '$1';
   let awaitingPaid = false;
+  let myLink = null;
 
-  function setLink(slug) {
-    if (!slug) return;
-    permalink.href = `/l/${encodeURIComponent(slug)}`;
-    permalink.hidden = false;
-  }
+  // One is picked at random each time the buyer shares.
+  const SHARE_TEXTS = [
+    `Hey, I spent ${price} to tell you something. Look:`,
+    `I paid ${price} so you'd see this. Worth it?`,
+    `Hey, I just spent ${price} to put this on the internet:`,
+    `This cost me ${price}. You're welcome.`,
+    `I spent ${price} to say this. See it before someone replaces it:`,
+    `Hey, I bought the internet's one line for ${price}. Look:`,
+    `${price}, one line, and it's mine (for now):`,
+    `I paid ${price} to say this to you and everyone else:`,
+    `Hey, my ${price} line is up right now. Quick, look:`,
+    `Spent a buck. Said my piece. Catch it before it's gone:`,
+  ];
 
   function showShare(slug) {
     if (!slug) return;
-    const href = `/l/${encodeURIComponent(slug)}`;
-    shareLink.href = href;
-    shareLink.textContent = window.location.origin + href;
-    share.hidden = false;
+    myLink = `${window.location.origin}/l/${encodeURIComponent(slug)}`;
+    shareBtn.hidden = false;
+    try { localStorage.setItem('myLine', slug); } catch { /* storage unavailable */ }
   }
+
+  function savedSlug() {
+    try { return localStorage.getItem('myLine'); } catch { return null; }
+  }
+
+  function hideShare() {
+    myLink = null;
+    shareBtn.hidden = true;
+    shareNote.textContent = '';
+  }
+
+  shareBtn.addEventListener('click', async () => {
+    if (!myLink) return;
+    const text = SHARE_TEXTS[Math.floor(Math.random() * SHARE_TEXTS.length)];
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'OneBuckLine', text, url: myLink });
+        return;
+      } catch (err) {
+        if (err && err.name === 'AbortError') return; // user closed the share sheet
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(`${text} ${myLink}`);
+      shareNote.textContent = 'Copied. Paste it anywhere.';
+    } catch {
+      shareNote.textContent = myLink;
+    }
+    setTimeout(() => { shareNote.textContent = ''; }, 4000);
+  });
 
   function setLine(text) {
     if (line.textContent === text) return;
@@ -123,14 +161,17 @@
         const state = JSON.parse(ev.data);
         const changed = line.textContent !== state.text;
         setLine(state.text);
-        setLink(state.slug);
         if (awaitingPaid && changed) {
           // After paying, the first change that arrives is the buyer's line.
           $('paid-msg').textContent = 'The line is yours. For now.';
           showShare(state.slug);
           awaitingPaid = false;
-        } else if (document.body.dataset.demo === 'true' && !paid.hidden && share.hidden) {
+        } else if (document.body.dataset.demo === 'true' && !paid.hidden && !myLink) {
           showShare(state.slug);
+        } else if (changed && myLink) {
+          hideShare(); // someone replaced the buyer's line
+        } else if (!myLink && state.slug && state.slug === savedSlug()) {
+          showShare(state.slug); // buyer came back while their line is still up
         }
       } catch { /* ignore malformed event */ }
     });
