@@ -274,8 +274,8 @@ function createApp(overrides = {}) {
 
   function renderLogin(error) {
     return adminPage(
-      'BuckLine admin',
-      `<main class="login"><h1>BuckLine admin</h1>
+      'OneBuckLine admin',
+      `<main class="login"><h1>OneBuckLine admin</h1>
 ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
 <form method="post" action="/adminpanel/login">
 <label>Login <input name="login" autocomplete="username" required autofocus></label>
@@ -292,7 +292,7 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
     }
   }
 
-  function renderTransactions() {
+  function renderTransactions(flash) {
     const list = transactions.all();
     const totals = {};
     for (const t of list) if (t.status === 'paid') totals[t.currency] = (totals[t.currency] || 0) + t.amount;
@@ -308,9 +308,16 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
       )
       .join('');
     return adminPage(
-      'Transactions — BuckLine admin',
+      'Transactions — OneBuckLine admin',
       `<header><h1>Transactions</h1>
 <form method="post" action="/adminpanel/logout"><button type="submit">Sign out</button></form></header>
+${flash ? `<p class="flash ${flash.ok ? 'ok' : 'error'}">${escapeHtml(flash.message)}</p>` : ''}
+<section class="setline"><h2>Current line</h2>
+<p class="current">${escapeHtml(store.get().text)}</p>
+<form method="post" action="/adminpanel/line">
+<input name="text" maxlength="${config.maxLength * 2}" required placeholder="New line (max ${config.maxLength} characters)" aria-label="New line">
+<button type="submit">Set line</button></form>
+<p class="hint">Changes the line for everyone right away, free of charge. Logged as an admin change.</p></section>
 <p class="summary">${list.length} transaction${list.length === 1 ? '' : 's'} · paid total ${escapeHtml(totalText)}</p>
 <div class="table-wrap"><table><thead><tr><th>Time (UTC)</th><th>Status</th><th>Amount</th><th>Email</th><th>Text</th><th>ID</th></tr></thead>
 <tbody>${rows || '<tr><td colspan="6" class="empty">No transactions yet.</td></tr>'}</tbody></table></div>`,
@@ -342,9 +349,34 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
   async function handleAdmin(req, res, pathname, method) {
     if (!config.adminPassword) return send(res, 404, 'Not found', { 'Content-Type': 'text/plain' });
     if (pathname === '/adminpanel' && method === 'GET') {
-      return send(res, 200, isAdmin(req) ? renderTransactions() : renderLogin(), ADMIN_HEADERS);
+      if (!isAdmin(req)) return send(res, 200, renderLogin(), ADMIN_HEADERS);
+      const updated = new URL(req.url, 'http://localhost').searchParams.has('updated');
+      return send(res, 200, renderTransactions(updated && { ok: true, message: 'Line updated.' }), ADMIN_HEADERS);
     }
     if (pathname === '/adminpanel/login' && method === 'POST') return handleLogin(req, res);
+    if (pathname === '/adminpanel/line' && method === 'POST') {
+      if (!isAdmin(req)) return send(res, 303, undefined, { Location: '/adminpanel' });
+      let form;
+      try {
+        form = new URLSearchParams(await readBody(req));
+      } catch (err) {
+        return send(res, err.status || 400, 'Bad request', { 'Content-Type': 'text/plain' });
+      }
+      const result = validateLine(form.get('text'), config);
+      if (!result.ok) {
+        return send(res, 400, renderTransactions({ ok: false, message: result.error }), ADMIN_HEADERS);
+      }
+      store.set(result.text);
+      transactions.add({
+        id: `admin_${Date.now().toString(36)}`,
+        status: 'admin',
+        text: result.text,
+        amount: 0,
+        currency: config.currency,
+        email: null,
+      });
+      return send(res, 303, undefined, { Location: '/adminpanel?updated=1' });
+    }
     if (pathname === '/adminpanel/logout' && method === 'POST') {
       return send(res, 303, undefined, {
         Location: '/adminpanel',
@@ -393,7 +425,7 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
 if (require.main === module) {
   const { server, config } = createApp();
   server.listen(config.port, config.host, () => {
-    console.log(`BuckLine listening on http://${config.host}:${config.port}`);
+    console.log(`OneBuckLine listening on http://${config.host}:${config.port}`);
     if (config.demoMode) {
       console.log('Demo mode: no STRIPE_SECRET_KEY set, so "paying" changes the line for free.');
     } else if (!config.stripeWebhookSecret) {

@@ -273,3 +273,39 @@ test('admin panel requires login and shows transactions', async () => {
     await close(app);
   }
 });
+
+test('admin can set the line; anonymous cannot', async () => {
+  const app = createApp({ dataFile: tmpFile(), demoMode: false, stripeSecretKey: 'sk_test_x', adminPassword: 'pw' });
+  const base = await listen(app);
+  try {
+    const post = (path, body, cookie) =>
+      fetch(base + path, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...(cookie && { Cookie: cookie }) },
+        body: new URLSearchParams(body),
+      });
+
+    const anon = await post('/adminpanel/line', { text: 'Hijack' });
+    assert.equal(anon.status, 303);
+    assert.notEqual(app.store.get().text, 'Hijack');
+
+    const cookie = (await post('/adminpanel/login', { login: 'admin', password: 'pw' })).headers
+      .get('set-cookie')
+      .split(';')[0];
+
+    const tooLong = await post('/adminpanel/line', { text: 'x'.repeat(200) }, cookie);
+    assert.equal(tooLong.status, 400);
+
+    const ok = await post('/adminpanel/line', { text: '  Set by admin  ' }, cookie);
+    assert.equal(ok.status, 303);
+    assert.equal(app.store.get().text, 'Set by admin');
+    assert.equal(app.transactions.all()[0].status, 'admin');
+
+    const page = await (await fetch(base + '/adminpanel?updated=1', { headers: { Cookie: cookie } })).text();
+    assert.match(page, /Line updated\./);
+    assert.match(page, /class="current">Set by admin</);
+  } finally {
+    await close(app);
+  }
+});

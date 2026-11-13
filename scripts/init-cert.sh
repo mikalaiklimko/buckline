@@ -10,9 +10,7 @@ if [ -n "${1:-}" ]; then ACCOUNT="--email $1"; else ACCOUNT="--register-unsafely
 # Port 80 must be free for the standalone challenge.
 docker compose stop nginx 2>/dev/null || true
 
-docker run --rm -p 80:80 \
-  -v buckline_letsencrypt:/etc/letsencrypt \
-  certbot/certbot:v2.11.0 certonly --standalone \
-  -d "$DOMAIN" $ACCOUNT --agree-tos --non-interactive
+docker compose run --rm --no-deps -p 80:80 --entrypoint certbot certbot \
+  certonly --standalone -d "$DOMAIN" $ACCOUNT --agree-tos --non-interactive
 
-docker compose up -d
+docker compose up -d --build

@@ -1,4 +1,4 @@
-# BuckLine
+# OneBuckLine
 
 **Pay a buck. Own the line.**
 

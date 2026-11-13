@@ -89,3 +89,31 @@ td.empty { text-align: center; color: var(--muted); padding: 32px; }
 .s-paid { background: var(--ok-bg); color: var(--ok); }
 .s-rejected { background: var(--warn-bg); color: var(--warn); }
 .s-demo { background: var(--demo-bg); color: var(--demo); }
+.setline, .flash {
+  max-width: 1200px;
+  margin: 16px auto;
+}
+.setline {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.setline h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 6px; }
+.setline .current { font-size: 18px; font-weight: 600; margin: 0 0 12px; overflow-wrap: anywhere; }
+.setline form { display: flex; gap: 8px; flex-wrap: wrap; }
+.setline input {
+  flex: 1 1 260px;
+  font: inherit;
+  padding: 9px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+.setline button { background: var(--accent); border-color: var(--accent); color: #fff; }
+.setline .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+.flash { padding: 8px 12px; border-radius: 6px; }
+.flash.ok { background: var(--ok-bg); color: var(--ok); }
+.flash.error { background: var(--warn-bg); color: var(--warn); }
+.s-admin { background: var(--demo-bg); color: var(--demo); }

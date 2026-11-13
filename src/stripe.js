@@ -28,7 +28,7 @@ async function createCheckoutSession({ secretKey, text, priceCents, currency, ba
           currency,
           unit_amount: priceCents,
           product_data: {
-            name: 'BuckLine — own the line',
+            name: 'OneBuckLine — own the line',
             description: text.length > 300 ? `${text.slice(0, 297)}...` : text,
           },
         },
