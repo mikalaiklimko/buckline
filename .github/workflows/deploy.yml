@@ -49,6 +49,12 @@ jobs:
 
       - name: Upload files
         run: |
+          # Expand a leading "~" to the remote home directory.
+          case "$DEPLOY_PATH" in
+            "~"|"~/"*) DEPLOY_PATH="$(ssh target 'echo $HOME')${DEPLOY_PATH#\~}" ;;
+          esac
+          echo "DEPLOY_PATH=$DEPLOY_PATH" >> "$GITHUB_ENV"
+          echo "Deploying to $DEPLOY_PATH"
           ssh target "mkdir -p '$DEPLOY_PATH'"
           rsync -az --delete \
             --exclude '.git/' --exclude '.github/' --exclude 'test/' \
@@ -57,7 +63,7 @@ jobs:
 
       - name: Restart service
         run: |
-          ssh target "cd '$DEPLOY_PATH' && test -f .env && docker compose up -d --build --remove-orphans && docker image prune -f"
+          ssh target "cd '$DEPLOY_PATH' && { test -f .env || { echo 'Missing $DEPLOY_PATH/.env on server' >&2; exit 1; }; } && docker compose up -d --build --remove-orphans && docker image prune -f"
 
       - name: Health check
         run: |
