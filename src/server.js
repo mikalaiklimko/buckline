@@ -8,6 +8,8 @@ const defaultConfig = require('./config');
 const { LineStore } = require('./store');
 const { validateLine } = require('./validate');
 const stripe = require('./stripe');
+const { TransactionLog } = require('./transactions');
+const admin = require('./admin');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const MAX_BODY_BYTES = 64 * 1024;
@@ -94,6 +96,14 @@ function createApp(overrides = {}) {
   const config = { ...defaultConfig, ...overrides };
   config.demoMode = overrides.demoMode ?? !config.stripeSecretKey;
   const store = overrides.store || new LineStore(config.dataFile, config.initialText);
+  const transactions =
+    overrides.transactions ||
+    new TransactionLog(
+      overrides.transactionsFile ||
+        (overrides.dataFile ? path.join(path.dirname(config.dataFile), 'transactions.jsonl') : config.transactionsFile),
+    );
+  const sessions = admin.createSessions();
+  const allowLogin = rateLimiter(5);
   const allowCheckout = rateLimiter(config.checkoutRateLimit);
   const createSession = overrides.createCheckoutSession || stripe.createCheckoutSession;
   const sseClients = new Set();
@@ -160,6 +170,14 @@ function createApp(overrides = {}) {
 
     if (config.demoMode) {
       store.set(result.text);
+      transactions.add({
+        id: `demo_${Date.now().toString(36)}`,
+        status: 'demo',
+        text: result.text,
+        amount: 0,
+        currency: config.currency,
+        email: null,
+      });
       return sendJson(res, 200, { url: '/?paid=1', demo: true });
     }
 
@@ -201,8 +219,18 @@ function createApp(overrides = {}) {
       if (session.payment_status === 'paid') {
         // Re-validate: the blocklist may have changed since checkout started.
         const result = validateLine(session.metadata?.buckline_text, config);
-        if (result.ok) store.set(result.text, session.id);
-        else console.warn(`[webhook] paid session ${session.id} had rejected text; refund manually.`);
+        const applied = result.ok && store.set(result.text, session.id);
+        if (!result.ok) console.warn(`[webhook] paid session ${session.id} had rejected text; refund manually.`);
+        if (applied || !result.ok) {
+          transactions.add({
+            id: session.id,
+            status: result.ok ? 'paid' : 'rejected (refund)',
+            text: String(session.metadata?.buckline_text ?? ''),
+            amount: Number(session.amount_total) || 0,
+            currency: session.currency || config.currency,
+            email: session.customer_details?.email || null,
+          });
+        }
       }
     }
     return sendJson(res, 200, { received: true });
@@ -225,6 +253,107 @@ function createApp(overrides = {}) {
     });
   }
 
+  // ---------- admin panel ----------
+
+  const ADMIN_HEADERS = {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Robots-Tag': 'noindex',
+  };
+
+  function isAdmin(req) {
+    return sessions.valid(admin.parseCookies(req.headers.cookie)[admin.COOKIE]);
+  }
+
+  function adminPage(title, body) {
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>${escapeHtml(title)}</title>
+<link rel="stylesheet" href="/admin.css"></head><body>${body}</body></html>`;
+  }
+
+  function renderLogin(error) {
+    return adminPage(
+      'BuckLine admin',
+      `<main class="login"><h1>BuckLine admin</h1>
+${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
+<form method="post" action="/adminpanel/login">
+<label>Login <input name="login" autocomplete="username" required autofocus></label>
+<label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+<button type="submit">Sign in</button></form></main>`,
+    );
+  }
+
+  function money(cents, currency) {
+    try {
+      return (cents / 100).toLocaleString('en-US', { style: 'currency', currency: String(currency).toUpperCase() });
+    } catch {
+      return `${(cents / 100).toFixed(2)} ${currency}`;
+    }
+  }
+
+  function renderTransactions() {
+    const list = transactions.all();
+    const totals = {};
+    for (const t of list) if (t.status === 'paid') totals[t.currency] = (totals[t.currency] || 0) + t.amount;
+    const totalText = Object.entries(totals).map(([c, v]) => money(v, c)).join(', ') || money(0, config.currency);
+    const rows = list
+      .map(
+        (t) => `<tr><td>${escapeHtml(t.createdAt.replace('T', ' ').slice(0, 19))}</td>
+<td><span class="status s-${escapeHtml(t.status.split(' ')[0])}">${escapeHtml(t.status)}</span></td>
+<td class="num">${escapeHtml(money(t.amount, t.currency))}</td>
+<td>${escapeHtml(t.email || '—')}</td>
+<td class="text">${escapeHtml(t.text)}</td>
+<td class="id">${escapeHtml(t.id)}</td></tr>`,
+      )
+      .join('');
+    return adminPage(
+      'Transactions — BuckLine admin',
+      `<header><h1>Transactions</h1>
+<form method="post" action="/adminpanel/logout"><button type="submit">Sign out</button></form></header>
+<p class="summary">${list.length} transaction${list.length === 1 ? '' : 's'} · paid total ${escapeHtml(totalText)}</p>
+<div class="table-wrap"><table><thead><tr><th>Time (UTC)</th><th>Status</th><th>Amount</th><th>Email</th><th>Text</th><th>ID</th></tr></thead>
+<tbody>${rows || '<tr><td colspan="6" class="empty">No transactions yet.</td></tr>'}</tbody></table></div>`,
+    );
+  }
+
+  async function handleLogin(req, res) {
+    if (!allowLogin(clientIp(req))) {
+      return send(res, 429, renderLogin('Too many attempts. Try again in a minute.'), ADMIN_HEADERS);
+    }
+    let form;
+    try {
+      form = new URLSearchParams(await readBody(req));
+    } catch (err) {
+      return send(res, err.status || 400, 'Bad request', { 'Content-Type': 'text/plain' });
+    }
+    const userOk = admin.safeEqual(form.get('login') || '', config.adminUser);
+    const passOk = admin.safeEqual(form.get('password') || '', config.adminPassword);
+    if (!(userOk && passOk)) {
+      return send(res, 401, renderLogin('Wrong login or password.'), ADMIN_HEADERS);
+    }
+    const secure = config.baseUrl.startsWith('https:') ? '; Secure' : '';
+    return send(res, 303, undefined, {
+      Location: '/adminpanel',
+      'Set-Cookie': `${admin.COOKIE}=${sessions.issue()}; Path=/adminpanel; HttpOnly; SameSite=Strict; Max-Age=${admin.SESSION_MS / 1000}${secure}`,
+    });
+  }
+
+  async function handleAdmin(req, res, pathname, method) {
+    if (!config.adminPassword) return send(res, 404, 'Not found', { 'Content-Type': 'text/plain' });
+    if (pathname === '/adminpanel' && method === 'GET') {
+      return send(res, 200, isAdmin(req) ? renderTransactions() : renderLogin(), ADMIN_HEADERS);
+    }
+    if (pathname === '/adminpanel/login' && method === 'POST') return handleLogin(req, res);
+    if (pathname === '/adminpanel/logout' && method === 'POST') {
+      return send(res, 303, undefined, {
+        Location: '/adminpanel',
+        'Set-Cookie': `${admin.COOKIE}=; Path=/adminpanel; HttpOnly; SameSite=Strict; Max-Age=0`,
+      });
+    }
+    return send(res, 404, 'Not found', { 'Content-Type': 'text/plain' });
+  }
+
   async function handler(req, res) {
     const { pathname } = new URL(req.url, 'http://localhost');
     const method = req.method;
@@ -241,6 +370,9 @@ function createApp(overrides = {}) {
       if (method === 'GET' && pathname === '/api/events') return handleEvents(req, res);
       if (method === 'POST' && pathname === '/api/checkout') return await handleCheckout(req, res);
       if (method === 'POST' && pathname === '/api/stripe/webhook') return await handleWebhook(req, res);
+      if (pathname === '/adminpanel' || pathname.startsWith('/adminpanel/')) {
+        return await handleAdmin(req, res, pathname, method);
+      }
       if (method === 'GET' || method === 'HEAD') return serveStatic(req, res, pathname);
       return send(res, 405, 'Method not allowed', { 'Content-Type': 'text/plain' });
     } catch (err) {
@@ -255,7 +387,7 @@ function createApp(overrides = {}) {
     for (const c of sseClients) c.end();
     sseClients.clear();
   };
-  return { server, store, config };
+  return { server, store, config, transactions };
 }
 
 if (require.main === module) {

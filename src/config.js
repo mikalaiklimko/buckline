@@ -26,10 +26,15 @@ const config = {
     .filter(Boolean),
   // Checkout attempts allowed per IP per minute.
   checkoutRateLimit: int('CHECKOUT_RATE_LIMIT', 10),
+  // Admin panel at /adminpanel. Disabled unless ADMIN_PASSWORD is set.
+  adminUser: process.env.ADMIN_USER || 'admin',
+  adminPassword: process.env.ADMIN_PASSWORD || '',
   trustProxy: process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true',
 };
 
 // Without a Stripe key the app runs in demo mode: "paying" applies the text immediately.
 config.demoMode = !config.stripeSecretKey;
+config.transactionsFile =
+  process.env.TRANSACTIONS_FILE || path.join(path.dirname(config.dataFile), 'transactions.jsonl');
 
 module.exports = config;

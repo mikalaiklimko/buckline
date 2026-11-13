@@ -210,3 +210,66 @@ test('SSE stream sends the current line', async () => {
   assert.match(chunk, /"text":/);
   ctrl.abort();
 });
+
+// ---------- admin panel ----------
+
+test('stripe mode: paid webhook is recorded once in the transaction log', () => {
+  const paid = stripeApp.transactions.all().filter((t) => t.id === 'cs_test_1');
+  assert.equal(paid.length, 1);
+  assert.equal(paid[0].status, 'paid');
+  assert.equal(paid[0].text, 'Paid line');
+  assert.equal(stripeApp.transactions.all().some((t) => t.id === 'cs_test_2'), false, 'unpaid not logged');
+});
+
+test('admin panel is disabled without ADMIN_PASSWORD', async () => {
+  const res = await fetch(stripeBase + '/adminpanel');
+  assert.equal(res.status, 404);
+});
+
+test('admin panel requires login and shows transactions', async () => {
+  const app = createApp({
+    dataFile: tmpFile(),
+    demoMode: true,
+    adminUser: 'boss',
+    adminPassword: 's3cret',
+  });
+  const base = await listen(app);
+  try {
+    await fetch(base + '/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Admin <b>visible</b>' }),
+    });
+
+    const anon = await (await fetch(base + '/adminpanel')).text();
+    assert.match(anon, /name="password"/);
+    assert.doesNotMatch(anon, /Admin/);
+
+    const login = (password) =>
+      fetch(base + '/adminpanel/login', {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ login: 'boss', password }),
+      });
+
+    const bad = await login('wrong');
+    assert.equal(bad.status, 401);
+    assert.equal(bad.headers.get('set-cookie'), null);
+
+    const ok = await login('s3cret');
+    assert.equal(ok.status, 303);
+    const cookie = ok.headers.get('set-cookie').split(';')[0];
+    assert.match(ok.headers.get('set-cookie'), /HttpOnly/);
+
+    const page = await fetch(base + '/adminpanel', { headers: { Cookie: cookie } });
+    const html = await page.text();
+    assert.match(html, /<table/);
+    assert.match(html, /Admin &lt;b&gt;visible&lt;\/b&gt;/, 'text is escaped');
+
+    const forged = await (await fetch(base + '/adminpanel', { headers: { Cookie: 'bl_admin=9999999999999.x' } })).text();
+    assert.doesNotMatch(forged, /<table/);
+  } finally {
+    await close(app);
+  }
+});
