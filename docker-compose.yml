@@ -1,0 +1,14 @@
+services:
+  buckline:
+    build: .
+    image: buckline:latest
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - buckline-data:/data
+    restart: unless-stopped
+
+volumes:
+  buckline-data:

@@ -1,0 +1,17 @@
+{
+  "name": "buckline",
+  "version": "1.0.0",
+  "description": "BuckLine — Pay a buck. Own the line.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "license": "UNLICENSED"
+}

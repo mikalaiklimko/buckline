@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BuckLine — Pay a buck. Own the line.</title>
+  <meta name="description" content="One line of text on the internet. Pay a buck to change it. It stays until someone else pays.">
+  <meta property="og:title" content="BuckLine">
+  <meta property="og:description" content="{{TEXT}}">
+  <meta name="theme-color" content="#0A0A0A">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body data-max-length="{{MAX_LENGTH}}" data-demo="{{DEMO}}">
+  <div class="page">
+    <header class="header">
+      <a class="logo" href="/" aria-label="BuckLine home">Buck<span>Line</span></a>
+      <nav class="nav">
+        <a href="#how">How it works</a>
+        <span class="live" id="live-status"><span class="dot" aria-hidden="true"></span><span id="live-label">Live</span></span>
+      </nav>
+    </header>
+
+    <main class="hero">
+      <p class="eyebrow">The line right now</p>
+      <h1 class="line" id="line" aria-live="polite">{{TEXT}}</h1>
+
+      <div class="actions">
+        <div id="cta" class="stack">
+          <button class="btn btn-primary btn-xl" id="open-btn" type="button">Own the line — {{PRICE}}</button>
+          <p class="muted">Pay a buck. Change the text.</p>
+        </div>
+
+        <form id="edit-form" class="edit" hidden novalidate>
+          <div class="edit-row">
+            <label class="field">
+              <span class="field-label">Your line · <span id="count">0</span>/{{MAX_LENGTH}}</span>
+              <input id="line-input" name="text" type="text" maxlength="{{MAX_LENGTH}}" autocomplete="off" placeholder="Say something worth a dollar" required>
+            </label>
+            <button class="btn btn-primary" id="pay-btn" type="submit">Pay {{PRICE}} &amp; publish</button>
+            <button class="btn btn-ghost" id="cancel-btn" type="button">Cancel</button>
+          </div>
+          <p class="small muted" id="form-note">Secure checkout. Your line stays up until someone else pays.</p>
+          <p class="small error" id="form-error" role="alert" hidden></p>
+        </form>
+
+        <div id="paid" class="stack" hidden>
+          <div class="toast">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#4ADE80" stroke-width="2.5" aria-hidden="true"><path d="M4 10.5l4 4 8-9"/></svg>
+            <span id="paid-msg">The line is yours. For now.</span>
+          </div>
+          <button class="btn btn-link" id="again-btn" type="button">Change it again — {{PRICE}}</button>
+        </div>
+      </div>
+    </main>
+
+    <section class="how" id="how" aria-labelledby="how-title">
+      <h2 class="visually-hidden" id="how-title">How it works</h2>
+      <div class="steps">
+        <div class="step">
+          <span class="step-num">01</span>
+          <h3>Pay a buck</h3>
+          <p>One dollar, one change. No account needed.</p>
+        </div>
+        <div class="step">
+          <span class="step-num">02</span>
+          <h3>Write your line</h3>
+          <p>Up to {{MAX_LENGTH}} characters, shown to everyone who visits.</p>
+        </div>
+        <div class="step">
+          <span class="step-num">03</span>
+          <h3>Own it — until you don't</h3>
+          <p>It stays up until the next person pays.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span><strong>BuckLine</strong> — Pay a buck. Own the line.</span>
+      <span class="footer-links"><a href="/terms.html">Terms</a><a href="/rules.html">Content rules</a></span>
+    </footer>
+  </div>
+</body>
+</html>
