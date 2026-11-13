@@ -1,0 +1,74 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: rpod
+    env:
+      SSH_HOST: ${{ vars.SSH_HOST }}
+      SSH_USER: ${{ vars.SSH_USER }}
+      SSH_PORT: ${{ vars.SSH_PORT || '22' }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          echo "${{ vars.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<CFG
+          Host target
+            HostName $SSH_HOST
+            User $SSH_USER
+            Port $SSH_PORT
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          CFG
+
+      - name: Upload files
+        run: |
+          ssh target "mkdir -p '$DEPLOY_PATH'"
+          rsync -az --delete \
+            --exclude '.git/' --exclude '.github/' --exclude 'test/' \
+            --exclude '.env' --exclude 'node_modules/' \
+            ./ "target:$DEPLOY_PATH/"
+
+      - name: Restart service
+        run: |
+          ssh target "cd '$DEPLOY_PATH' && test -f .env && docker compose up -d --build --remove-orphans && docker image prune -f"
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 15); do
+            if ssh target "wget -qO- http://127.0.0.1:3000/healthz" >/dev/null 2>&1; then
+              echo "Healthy"; exit 0
+            fi
+            sleep 4
+          done
+          echo "Health check failed"; ssh target "cd '$DEPLOY_PATH' && docker compose logs --tail=100"; exit 1
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/id_deploy
