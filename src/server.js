@@ -334,6 +334,33 @@ function createApp(overrides = {}) {
 
   // ---------- permanent line pages ----------
 
+  // Picked at random on each view of the current line's page.
+  const CURRENT_EYEBROWS = [
+    'Holding the line, for now',
+    'Still standing, somehow',
+    'Up there right now',
+    'Owning the line, for now',
+    'Clinging on, for now',
+    'King of the line, for now',
+    'Not replaced yet',
+    'Living rent-free up there',
+    'Top of the internet, briefly',
+    'Still the line, believe it or not',
+  ];
+  const CURRENT_CTAS = [
+    'Think you can top it?',
+    'Got something better?',
+    'Knock it off the top',
+    'Your turn to own it',
+    'Say it better',
+    'Bump it off',
+    'Make it yours',
+    'Take the line',
+    'Write over it',
+    'Steal the spotlight',
+  ];
+  const pick = (list) => list[Math.floor(Math.random() * list.length)];
+
   const SLUG_RE = /^\/l\/([A-Za-z0-9_-]{6,16})$/;
 
   function renderLinePage(tx) {
@@ -346,13 +373,13 @@ function createApp(overrides = {}) {
     const next = items.slice(idx + 1).find((t) => t.slug);
     const lasted = next ? duration(Date.parse(next.createdAt) - posted) : null;
 
-    const eyebrow = current ? 'Holding the line, for now' : 'Once upon a time, the line said';
+    const eyebrow = current ? pick(CURRENT_EYEBROWS) : 'Once upon a time, the line said';
     const status = current
-      ? "nobody has knocked it off yet"
+      ? null
       : lasted
         ? `lasted ${lasted} before someone paid to replace it`
         : 'since replaced';
-    const cta = current ? `Think you can top it? \u2014 ${formatPrice()}` : 'See what it says now';
+    const cta = current ? `${pick(CURRENT_CTAS)} \u2014 ${formatPrice()}` : 'See what it says now';
     const title = `\u201C${tx.text}\u201D \u2014 OneBuckLine`;
     return `<!doctype html>
 <html lang="en">
@@ -378,7 +405,7 @@ function createApp(overrides = {}) {
       <h1 class="line">${escapeHtml(tx.text)}</h1>
       <p class="muted permalink-meta">Posted <time datetime="${escapeHtml(tx.createdAt)}" title="${escapeHtml(date)} UTC">${escapeHtml(
         timeAgo(posted),
-      )}</time> \u00B7 ${escapeHtml(status)}</p>
+      )}</time>${status ? ` \u00B7 ${escapeHtml(status)}` : ''}</p>
       <div class="actions">
         <a class="btn btn-primary btn-xl" href="/">${escapeHtml(cta)} <span aria-hidden="true">\u2192</span></a>
       </div>

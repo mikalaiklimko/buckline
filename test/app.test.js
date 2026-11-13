@@ -336,7 +336,8 @@ test('every new line gets a permanent link page', async () => {
     assert.match(oldHtml, /lasted .* before someone paid/);
 
     const cur = await (await fetch(base + second.link)).text();
-    assert.match(cur, /nobody has knocked it off yet/);
+    assert.match(cur, /<\/time><\/p>/, "no status after the date");
+    assert.match(cur, /— \$1 <span/);
     assert.match(cur, /just now/);
 
     const home = await (await fetch(base + '/')).text();
