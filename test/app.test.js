@@ -324,10 +324,24 @@ test('every new line gets a permanent link page', async () => {
         body: JSON.stringify({ text }),
       })).json();
 
-    const first = await pay('First <line>');
+    // The buyer finds their own line through the session ID in the return URL.
+    const myLink = async (r) => {
+      const sid = new URL(r.url, base).searchParams.get('session_id');
+      const res = await fetch(base + '/api/my-line?session_id=' + encodeURIComponent(sid));
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      return { link: '/l/' + body.slug, current: body.current };
+    };
+    const firstRes = await pay('First <line>');
+    const first = await myLink(firstRes);
     assert.match(first.link, /^\/l\/[A-Za-z0-9_-]{8}$/);
-    const second = await pay('Second line');
+    assert.equal(first.current, true);
+    const second = await myLink(await pay('Second line'));
     assert.notEqual(first.link, second.link);
+    assert.equal((await myLink(firstRes)).current, false, 'replaced line is no longer current');
+
+    assert.equal((await fetch(base + '/api/my-line?session_id=demo_nope12345')).status, 404);
+    assert.equal((await fetch(base + '/api/my-line?session_id=../etc')).status, 400);
 
     const old = await fetch(base + first.link);
     assert.equal(old.status, 200);

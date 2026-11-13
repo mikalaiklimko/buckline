@@ -44,7 +44,6 @@
   const shareBtn = $('share-btn');
   const shareNote = $('share-note');
   const price = document.body.dataset.price || '$1';
-  let awaitingPaid = false;
   let myLink = null;
 
   // One is picked at random each time the buyer shares.
@@ -65,11 +64,31 @@
     if (!slug) return;
     myLink = `${window.location.origin}/l/${encodeURIComponent(slug)}`;
     shareBtn.hidden = false;
-    try { localStorage.setItem('myLine', slug); } catch { /* storage unavailable */ }
+    try { localStorage.setItem('buckline.myLine.v2', slug); } catch { /* storage unavailable */ }
+  }
+
+  let currentSlug = null;
+
+  /** Asks the server which line this checkout session created (the webhook may lag). */
+  async function findMyLine(sessionId, attempt = 0) {
+    try {
+      const res = await fetch(`/api/my-line?session_id=${encodeURIComponent(sessionId)}`);
+      if (res.ok) {
+        const { slug, current } = await res.json();
+        try { localStorage.setItem('buckline.myLine.v2', slug); } catch { /* storage unavailable */ }
+        if (current || slug === currentSlug) {
+          $('paid-msg').textContent = 'The line is yours. For now.';
+          showShare(slug);
+        }
+        return;
+      }
+      if (res.status !== 404) return;
+    } catch { /* network hiccup: retry */ }
+    if (attempt < 30) setTimeout(() => findMyLine(sessionId, attempt + 1), 2000);
   }
 
   function savedSlug() {
-    try { return localStorage.getItem('myLine'); } catch { return null; }
+    try { return localStorage.getItem('buckline.myLine.v2'); } catch { return null; }
   }
 
   function hideShare() {
@@ -144,10 +163,11 @@
   const params = new URLSearchParams(window.location.search);
   if (params.has('paid')) {
     show('paid');
-    awaitingPaid = document.body.dataset.demo !== 'true';
     if (document.body.dataset.demo !== 'true') {
       $('paid-msg').textContent = 'Payment received. Your line goes up in a moment.';
     }
+    const sessionId = params.get('session_id');
+    if (sessionId) findMyLine(sessionId);
     history.replaceState(null, '', '/');
   } else if (params.has('cancelled')) {
     history.replaceState(null, '', '/');
@@ -159,20 +179,11 @@
     es.addEventListener('line', (ev) => {
       try {
         const state = JSON.parse(ev.data);
-        const changed = line.textContent !== state.text;
         setLine(state.text);
-        if (awaitingPaid && changed) {
-          // After paying, the first change that arrives is the buyer's line.
-          $('paid-msg').textContent = 'The line is yours. For now.';
-          showShare(state.slug);
-          awaitingPaid = false;
-        } else if (document.body.dataset.demo === 'true' && !paid.hidden && !myLink) {
-          showShare(state.slug);
-        } else if (changed && myLink) {
-          hideShare(); // someone replaced the buyer's line
-        } else if (!myLink && state.slug && state.slug === savedSlug()) {
-          showShare(state.slug); // buyer came back while their line is still up
-        }
+        currentSlug = state.slug;
+        // The share button belongs to the buyer, and only while their line is up.
+        if (state.slug && state.slug === savedSlug()) showShare(state.slug);
+        else if (myLink) hideShare();
       } catch { /* ignore malformed event */ }
     });
     es.addEventListener('open', () => {

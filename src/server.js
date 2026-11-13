@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -36,7 +37,7 @@ const SECURITY_HEADERS = {
 /** Content hash of a public file, used as ?v= so browsers fetch updates right away. */
 function assetVersion(file) {
   try {
-    return require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(PUBLIC_DIR, file))).digest('hex').slice(0, 10);
+    return crypto.createHash('sha256').update(fs.readFileSync(path.join(PUBLIC_DIR, file))).digest('hex').slice(0, 10);
   } catch {
     return '0';
   }
@@ -246,7 +247,7 @@ function createApp(overrides = {}) {
     if (config.demoMode) {
       store.set(result.text);
       transactions.add({
-        id: `demo_${Date.now().toString(36)}`,
+        id: `demo_${Date.now().toString(36)}${crypto.randomBytes(4).toString('hex')}`,
         slug: store.get().slug,
         status: 'demo',
         text: result.text,
@@ -254,7 +255,8 @@ function createApp(overrides = {}) {
         currency: config.currency,
         email: null,
       });
-      return sendJson(res, 200, { url: `/?paid=1`, demo: true, link: `/l/${store.get().slug}` });
+      const tx = transactions.all()[0];
+      return sendJson(res, 200, { url: `/?paid=1&session_id=${encodeURIComponent(tx.id)}`, demo: true });
     }
 
     try {
@@ -311,6 +313,21 @@ function createApp(overrides = {}) {
       }
     }
     return sendJson(res, 200, { received: true });
+  }
+
+  /**
+   * Tells a buyer which line is theirs. The checkout session ID is only known to
+   * the buyer (it is in the URL Stripe redirects them to), so it works as proof.
+   */
+  function handleMyLine(req, res) {
+    const sid = new URL(req.url, 'http://localhost').searchParams.get('session_id') || '';
+    if (!/^(cs_(test|live)_[A-Za-z0-9]{10,200}|demo_[a-z0-9]{8,40})$/.test(sid)) {
+      return sendJson(res, 400, { error: 'Invalid session.' });
+    }
+    const tx = transactions.items.find((t) => t.id === sid && t.slug);
+    // Not there yet: the webhook may still be on its way.
+    if (!tx) return sendJson(res, 404, { pending: true });
+    return sendJson(res, 200, { slug: tx.slug, current: store.get().slug === tx.slug });
   }
 
   function handleEvents(req, res) {
@@ -594,6 +611,7 @@ ${flash ? `<p class="flash ${flash.ok ? 'ok' : 'error'}">${escapeHtml(flash.mess
       }
       if (method === 'GET' && pathname === '/healthz') return sendJson(res, 200, { ok: true });
       if (method === 'GET' && pathname === '/api/line') return sendJson(res, 200, publicState());
+      if (method === 'GET' && pathname === '/api/my-line') return handleMyLine(req, res);
       if (method === 'GET' && pathname === '/api/events') return handleEvents(req, res);
       if (method === 'POST' && pathname === '/api/checkout') return await handleCheckout(req, res);
       if (method === 'POST' && pathname === '/api/stripe/webhook') return await handleWebhook(req, res);
