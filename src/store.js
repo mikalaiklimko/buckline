@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
@@ -12,7 +13,7 @@ class LineStore extends EventEmitter {
   constructor(file, initialText) {
     super();
     this.file = file;
-    this.state = { text: initialText, updatedAt: null, changes: 0 };
+    this.state = { text: initialText, updatedAt: null, changes: 0, slug: null };
     this.appliedSessions = new Set();
     this._load();
   }
@@ -25,6 +26,7 @@ class LineStore extends EventEmitter {
           text: raw.text,
           updatedAt: raw.updatedAt ?? null,
           changes: Number(raw.changes) || 0,
+          slug: typeof raw.slug === 'string' ? raw.slug : null,
         };
       }
       if (Array.isArray(raw.appliedSessions)) {
@@ -65,6 +67,8 @@ class LineStore extends EventEmitter {
       text,
       updatedAt: new Date().toISOString(),
       changes: this.state.changes + 1,
+      // Short public ID for this line's permanent link (/l/<slug>).
+      slug: crypto.randomBytes(6).toString('base64url'),
     };
     this._save();
     this.emit('change', this.get());

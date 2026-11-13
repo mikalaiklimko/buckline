@@ -41,6 +41,11 @@ class TransactionLog {
     return record;
   }
 
+  /** Finds the transaction for a line's public slug. */
+  bySlug(slug) {
+    return this.items.find((t) => t.slug === slug) || null;
+  }
+
   /** Newest first. */
   all() {
     return [...this.items].reverse();

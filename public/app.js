@@ -41,6 +41,25 @@
     formError.textContent = '';
   }
 
+  const permalink = $('permalink');
+  const share = $('share');
+  const shareLink = $('share-link');
+  let awaitingPaid = false;
+
+  function setLink(slug) {
+    if (!slug) return;
+    permalink.href = `/l/${encodeURIComponent(slug)}`;
+    permalink.hidden = false;
+  }
+
+  function showShare(slug) {
+    if (!slug) return;
+    const href = `/l/${encodeURIComponent(slug)}`;
+    shareLink.href = href;
+    shareLink.textContent = window.location.origin + href;
+    share.hidden = false;
+  }
+
   function setLine(text) {
     if (line.textContent === text) return;
     line.textContent = text;
@@ -87,6 +106,7 @@
   const params = new URLSearchParams(window.location.search);
   if (params.has('paid')) {
     show('paid');
+    awaitingPaid = document.body.dataset.demo !== 'true';
     if (document.body.dataset.demo !== 'true') {
       $('paid-msg').textContent = 'Payment received. Your line goes up in a moment.';
     }
@@ -101,9 +121,16 @@
     es.addEventListener('line', (ev) => {
       try {
         const state = JSON.parse(ev.data);
+        const changed = line.textContent !== state.text;
         setLine(state.text);
-        if (!paid.hidden && document.body.dataset.demo !== 'true') {
+        setLink(state.slug);
+        if (awaitingPaid && changed) {
+          // After paying, the first change that arrives is the buyer's line.
           $('paid-msg').textContent = 'The line is yours. For now.';
+          showShare(state.slug);
+          awaitingPaid = false;
+        } else if (document.body.dataset.demo === 'true' && !paid.hidden && share.hidden) {
+          showShare(state.slug);
         }
       } catch { /* ignore malformed event */ }
     });

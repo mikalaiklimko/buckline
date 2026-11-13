@@ -28,6 +28,7 @@
     <main class="hero">
       <p class="eyebrow">The line right now</p>
       <h1 class="line" id="line" aria-live="polite">{{TEXT}}</h1>
+      <p class="permalink-row"><a class="permalink" id="permalink" href="{{LINK}}" {{LINK_HIDDEN}}>Link to this line</a></p>
 
       <div class="actions">
         <div id="cta" class="stack">
@@ -53,6 +54,7 @@
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#4ADE80" stroke-width="2.5" aria-hidden="true"><path d="M4 10.5l4 4 8-9"/></svg>
             <span id="paid-msg">The line is yours. For now.</span>
           </div>
+          <p class="small muted" id="share" hidden>Your line's link: <a id="share-link" href="#"></a></p>
           <button class="btn btn-link" id="again-btn" type="button">Change it again — {{PRICE}}</button>
         </div>
       </div>

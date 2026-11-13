@@ -193,6 +193,9 @@ test('static files are served and path traversal is blocked', async () => {
   const css = await fetch(stripeBase + '/styles.css');
   assert.equal(css.status, 200);
   assert.match(css.headers.get('content-type'), /text\/css/);
+  assert.equal(css.headers.get('cache-control'), 'no-cache');
+  const v = await fetch(stripeBase + '/styles.css?v=abc');
+  assert.match(v.headers.get('cache-control'), /immutable/);
   const trav = await fetch(stripeBase + '/..%2fpackage.json');
   assert.equal(trav.status, 404);
   const raw = await fetch(stripeBase + '/index.html');
@@ -308,4 +311,81 @@ test('admin can set the line; anonymous cannot', async () => {
   } finally {
     await close(app);
   }
+});
+
+test('every new line gets a permanent link page', async () => {
+  const app = createApp({ dataFile: tmpFile(), demoMode: true });
+  const base = await listen(app);
+  try {
+    const pay = async (text) =>
+      (await fetch(base + '/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      })).json();
+
+    const first = await pay('First <line>');
+    assert.match(first.link, /^\/l\/[A-Za-z0-9_-]{8}$/);
+    const second = await pay('Second line');
+    assert.notEqual(first.link, second.link);
+
+    const old = await fetch(base + first.link);
+    assert.equal(old.status, 200);
+    const oldHtml = await old.text();
+    assert.match(oldHtml, /First &lt;line&gt;/);
+    assert.match(oldHtml, /lasted .* before someone paid/);
+
+    const cur = await (await fetch(base + second.link)).text();
+    assert.match(cur, /nobody has knocked it off yet/);
+    assert.match(cur, /just now/);
+
+    const home = await (await fetch(base + '/')).text();
+    assert.ok(home.includes(`href="${second.link}"`), 'home links the current line');
+    assert.equal((await (await fetch(base + '/api/line')).json()).slug, second.link.slice(3));
+
+    assert.equal((await fetch(base + '/l/doesnotexist')).status, 404);
+  } finally {
+    await close(app);
+  }
+});
+
+test('admin can switch between demo and live mode, and it persists', async () => {
+  const dataFile = tmpFile();
+  const opts = { dataFile, stripeSecretKey: 'sk_test_x', adminPassword: 'pw',
+    createCheckoutSession: async () => ({ url: 'https://checkout.stripe.com/x' }) };
+  const app = createApp(opts);
+  const base = await listen(app);
+  const post = (p, body, cookie) =>
+    fetch(base + p, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...(cookie && { Cookie: cookie }) },
+      body: new URLSearchParams(body),
+    });
+  const checkout = async () =>
+    (await fetch(base + '/api/checkout', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Mode test' }),
+    })).json();
+  try {
+    assert.match((await checkout()).url, /stripe/);
+
+    assert.equal((await post('/adminpanel/mode', { mode: 'demo' })).status, 303);
+    assert.equal(app.config.demoMode, false, 'anonymous cannot switch');
+
+    const cookie = (await post('/adminpanel/login', { login: 'admin', password: 'pw' })).headers
+      .get('set-cookie').split(';')[0];
+    await post('/adminpanel/mode', { mode: 'demo' }, cookie);
+    assert.equal(app.config.demoMode, true);
+    assert.equal((await checkout()).demo, true);
+
+    const page = await (await fetch(base + '/adminpanel', { headers: { Cookie: cookie } })).text();
+    assert.match(page, /Switch to live mode/);
+    assert.match(page, /<th>Link<\/th>/);
+    assert.match(page, /href="\/l\/[A-Za-z0-9_-]{8}"/);
+  } finally {
+    await close(app);
+  }
+
+  const restarted = createApp(opts);
+  assert.equal(restarted.config.demoMode, true, 'mode survives restart');
 });

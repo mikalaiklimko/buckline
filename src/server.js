@@ -33,6 +33,48 @@ const SECURITY_HEADERS = {
     "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 };
 
+/** Content hash of a public file, used as ?v= so browsers fetch updates right away. */
+function assetVersion(file) {
+  try {
+    return require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(PUBLIC_DIR, file))).digest('hex').slice(0, 10);
+  } catch {
+    return '0';
+  }
+}
+const ASSET = {
+  css: `/styles.css?v=${assetVersion('styles.css')}`,
+  js: `/app.js?v=${assetVersion('app.js')}`,
+  admin: `/admin.css?v=${assetVersion('admin.css')}`,
+};
+
+/** "3 minutes ago", "2 days ago". */
+function timeAgo(from, now = Date.now()) {
+  const sec = Math.max(0, Math.round((now - from) / 1000));
+  if (sec < 45) return 'just now';
+  return `${duration(sec * 1000)} ago`;
+}
+
+/** "5 minutes", "2 hours", "3 days". */
+function duration(ms) {
+  const sec = Math.max(1, Math.round(ms / 1000));
+  const units = [
+    ['year', 365 * 86400],
+    ['month', 30 * 86400],
+    ['week', 7 * 86400],
+    ['day', 86400],
+    ['hour', 3600],
+    ['minute', 60],
+    ['second', 1],
+  ];
+  for (const [name, size] of units) {
+    if (sec >= size || name === 'second') {
+      const n = Math.round(sec / size);
+      return `${n} ${name}${n === 1 ? '' : 's'}`;
+    }
+  }
+  return '';
+}
+
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, '&amp;')
@@ -95,6 +137,30 @@ function rateLimiter(limit, windowMs = 60_000) {
 function createApp(overrides = {}) {
   const config = { ...defaultConfig, ...overrides };
   config.demoMode = overrides.demoMode ?? !config.stripeSecretKey;
+
+  // Runtime settings changed from the admin panel (currently: demo mode on/off).
+  const settingsFile =
+    overrides.settingsFile || path.join(path.dirname(config.dataFile), 'settings.json');
+  if (overrides.demoMode === undefined) {
+    try {
+      const saved = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+      if (typeof saved.demoMode === 'boolean') config.demoMode = saved.demoMode || !config.stripeSecretKey;
+    } catch (err) {
+      if (err.code !== 'ENOENT') console.error(`[settings] could not read ${settingsFile}:`, err.message);
+    }
+  }
+
+  /** Switches demo mode; live mode needs a Stripe key. Returns an error message or null. */
+  function setDemoMode(demo) {
+    if (!demo && !config.stripeSecretKey) return 'Live mode needs STRIPE_SECRET_KEY in .env.';
+    config.demoMode = demo;
+    fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+    const tmp = `${settingsFile}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ demoMode: demo }, null, 2));
+    fs.renameSync(tmp, settingsFile);
+    console.log(`[admin] switched to ${demo ? 'demo' : 'live'} mode`);
+    return null;
+  }
   const store = overrides.store || new LineStore(config.dataFile, config.initialText);
   const transactions =
     overrides.transactions ||
@@ -108,7 +174,10 @@ function createApp(overrides = {}) {
   const createSession = overrides.createCheckoutSession || stripe.createCheckoutSession;
   const sseClients = new Set();
 
-  const indexTemplate = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
+  const indexTemplate = fs
+    .readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8')
+    .replace('href="/styles.css"', `href="${ASSET.css}"`)
+    .replace('src="/app.js"', `src="${ASSET.js}"`);
 
   store.on('change', (state) => {
     const payload = `event: line\ndata: ${JSON.stringify(publicState(state))}\n\n`;
@@ -116,7 +185,7 @@ function createApp(overrides = {}) {
   });
 
   function publicState(state = store.get()) {
-    return { text: state.text, updatedAt: state.updatedAt, changes: state.changes };
+    return { text: state.text, updatedAt: state.updatedAt, changes: state.changes, slug: state.slug };
   }
 
   function clientIp(req) {
@@ -127,16 +196,21 @@ function createApp(overrides = {}) {
     return req.socket.remoteAddress || 'unknown';
   }
 
-  function renderIndex() {
-    const { text } = store.get();
-    const price = (config.priceCents / 100).toLocaleString('en-US', {
+  function formatPrice() {
+    return (config.priceCents / 100).toLocaleString('en-US', {
       style: 'currency',
       currency: config.currency.toUpperCase(),
       minimumFractionDigits: config.priceCents % 100 === 0 ? 0 : 2,
     });
+  }
+
+  function renderIndex() {
+    const { text, slug } = store.get();
     return indexTemplate
       .replaceAll('{{TEXT}}', escapeHtml(text))
-      .replaceAll('{{PRICE}}', escapeHtml(price))
+      .replaceAll('{{LINK}}', slug ? `/l/${encodeURIComponent(slug)}` : '')
+      .replaceAll('{{LINK_HIDDEN}}', slug ? '' : 'hidden')
+      .replaceAll('{{PRICE}}', escapeHtml(formatPrice()))
       .replaceAll('{{MAX_LENGTH}}', String(config.maxLength))
       .replaceAll('{{DEMO}}', config.demoMode ? 'true' : 'false');
   }
@@ -150,7 +224,10 @@ function createApp(overrides = {}) {
       if (err) return send(res, 404, 'Not found', { 'Content-Type': 'text/plain' });
       send(res, 200, req.method === 'HEAD' ? undefined : data, {
         'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream',
-        'Cache-Control': 'public, max-age=3600',
+        // Versioned URLs (?v=hash) never change; plain ones must be revalidated.
+        'Cache-Control': new URL(req.url, 'http://localhost').searchParams.has('v')
+          ? 'public, max-age=31536000, immutable'
+          : 'no-cache',
       });
     });
   }
@@ -172,13 +249,14 @@ function createApp(overrides = {}) {
       store.set(result.text);
       transactions.add({
         id: `demo_${Date.now().toString(36)}`,
+        slug: store.get().slug,
         status: 'demo',
         text: result.text,
         amount: 0,
         currency: config.currency,
         email: null,
       });
-      return sendJson(res, 200, { url: '/?paid=1', demo: true });
+      return sendJson(res, 200, { url: `/?paid=1`, demo: true, link: `/l/${store.get().slug}` });
     }
 
     try {
@@ -224,6 +302,7 @@ function createApp(overrides = {}) {
         if (applied || !result.ok) {
           transactions.add({
             id: session.id,
+            slug: applied ? store.get().slug : null,
             status: result.ok ? 'paid' : 'rejected (refund)',
             text: String(session.metadata?.buckline_text ?? ''),
             amount: Number(session.amount_total) || 0,
@@ -253,6 +332,62 @@ function createApp(overrides = {}) {
     });
   }
 
+  // ---------- permanent line pages ----------
+
+  const SLUG_RE = /^\/l\/([A-Za-z0-9_-]{6,16})$/;
+
+  function renderLinePage(tx) {
+    const current = store.get().slug === tx.slug;
+    const posted = Date.parse(tx.createdAt);
+    const date = new Date(posted).toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short', timeZone: 'UTC' });
+    // When was it replaced? The next line in the log with a link.
+    const items = transactions.items;
+    const idx = items.indexOf(tx);
+    const next = items.slice(idx + 1).find((t) => t.slug);
+    const lasted = next ? duration(Date.parse(next.createdAt) - posted) : null;
+
+    const eyebrow = current ? 'Holding the line, for now' : 'Once upon a time, the line said';
+    const status = current
+      ? "nobody has knocked it off yet"
+      : lasted
+        ? `lasted ${lasted} before someone paid to replace it`
+        : 'since replaced';
+    const cta = current ? `Think you can top it? \u2014 ${formatPrice()}` : 'See what it says now';
+    const title = `\u201C${tx.text}\u201D \u2014 OneBuckLine`;
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)}</title>
+  <meta name="description" content="A line that was on OneBuckLine on ${escapeHtml(date)} UTC.">
+  <meta property="og:title" content="${escapeHtml(tx.text)}">
+  <meta property="og:description" content="Posted on OneBuckLine \u00B7 ${escapeHtml(date)} UTC">
+  <link rel="canonical" href="${escapeHtml(config.baseUrl)}/l/${escapeHtml(tx.slug)}">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap">
+  <link rel="stylesheet" href="${ASSET.css}">
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <a class="logo" href="/" aria-label="OneBuckLine home">OneBuck<span>Line</span></a>
+    </header>
+    <main class="hero">
+      <p class="eyebrow">${escapeHtml(eyebrow)}</p>
+      <h1 class="line">${escapeHtml(tx.text)}</h1>
+      <p class="muted permalink-meta">Posted <time datetime="${escapeHtml(tx.createdAt)}" title="${escapeHtml(date)} UTC">${escapeHtml(
+        timeAgo(posted),
+      )}</time> \u00B7 ${escapeHtml(status)}</p>
+      <div class="actions">
+        <a class="btn btn-primary btn-xl" href="/">${escapeHtml(cta)} <span aria-hidden="true">\u2192</span></a>
+      </div>
+    </main>
+  </div>
+</body>
+</html>`;
+  }
+
   // ---------- admin panel ----------
 
   const ADMIN_HEADERS = {
@@ -269,7 +404,7 @@ function createApp(overrides = {}) {
     return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="/admin.css"></head><body>${body}</body></html>`;
+<link rel="stylesheet" href="${ASSET.admin}"></head><body>${body}</body></html>`;
   }
 
   function renderLogin(error) {
@@ -304,6 +439,7 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
 <td class="num">${escapeHtml(money(t.amount, t.currency))}</td>
 <td>${escapeHtml(t.email || '—')}</td>
 <td class="text">${escapeHtml(t.text)}</td>
+<td class="link">${t.slug ? `<a href="/l/${encodeURIComponent(t.slug)}" target="_blank" rel="noopener">/l/${escapeHtml(t.slug)}</a>` : '—'}</td>
 <td class="id">${escapeHtml(t.id)}</td></tr>`,
       )
       .join('');
@@ -318,9 +454,21 @@ ${flash ? `<p class="flash ${flash.ok ? 'ok' : 'error'}">${escapeHtml(flash.mess
 <input name="text" maxlength="${config.maxLength * 2}" required placeholder="New line (max ${config.maxLength} characters)" aria-label="New line">
 <button type="submit">Set line</button></form>
 <p class="hint">Changes the line for everyone right away, free of charge. Logged as an admin change.</p></section>
+<section class="mode ${config.demoMode ? 'is-demo' : 'is-live'}">
+<div><h2>Mode</h2>
+<p class="mode-state"><strong>${config.demoMode ? 'Demo' : 'Live'}</strong> \u2014 ${
+      config.demoMode
+        ? 'anyone can change the line for free, no payment taken.'
+        : 'visitors pay through Stripe to change the line.'
+    }</p></div>
+<form method="post" action="/adminpanel/mode">
+<input type="hidden" name="mode" value="${config.demoMode ? 'live' : 'demo'}">
+<button type="submit"${!config.demoMode || config.stripeSecretKey ? '' : ' disabled title="Set STRIPE_SECRET_KEY first"'}>Switch to ${
+      config.demoMode ? 'live' : 'demo'
+    } mode</button></form></section>
 <p class="summary">${list.length} transaction${list.length === 1 ? '' : 's'} · paid total ${escapeHtml(totalText)}</p>
-<div class="table-wrap"><table><thead><tr><th>Time (UTC)</th><th>Status</th><th>Amount</th><th>Email</th><th>Text</th><th>ID</th></tr></thead>
-<tbody>${rows || '<tr><td colspan="6" class="empty">No transactions yet.</td></tr>'}</tbody></table></div>`,
+<div class="table-wrap"><table><thead><tr><th>Time (UTC)</th><th>Status</th><th>Amount</th><th>Email</th><th>Text</th><th>Link</th><th>ID</th></tr></thead>
+<tbody>${rows || '<tr><td colspan="7" class="empty">No transactions yet.</td></tr>'}</tbody></table></div>`,
     );
   }
 
@@ -350,10 +498,31 @@ ${flash ? `<p class="flash ${flash.ok ? 'ok' : 'error'}">${escapeHtml(flash.mess
     if (!config.adminPassword) return send(res, 404, 'Not found', { 'Content-Type': 'text/plain' });
     if (pathname === '/adminpanel' && method === 'GET') {
       if (!isAdmin(req)) return send(res, 200, renderLogin(), ADMIN_HEADERS);
-      const updated = new URL(req.url, 'http://localhost').searchParams.has('updated');
-      return send(res, 200, renderTransactions(updated && { ok: true, message: 'Line updated.' }), ADMIN_HEADERS);
+      const q = new URL(req.url, 'http://localhost').searchParams;
+      const flash = q.has('updated')
+        ? { ok: true, message: 'Line updated.' }
+        : q.get('mode') === 'demo'
+          ? { ok: true, message: 'Demo mode is on. Changes are free until you switch back.' }
+          : q.get('mode') === 'live'
+            ? { ok: true, message: 'Live mode is on. Visitors pay through Stripe.' }
+            : null;
+      return send(res, 200, renderTransactions(flash), ADMIN_HEADERS);
     }
     if (pathname === '/adminpanel/login' && method === 'POST') return handleLogin(req, res);
+    if (pathname === '/adminpanel/mode' && method === 'POST') {
+      if (!isAdmin(req)) return send(res, 303, undefined, { Location: '/adminpanel' });
+      let form;
+      try {
+        form = new URLSearchParams(await readBody(req));
+      } catch (err) {
+        return send(res, err.status || 400, 'Bad request', { 'Content-Type': 'text/plain' });
+      }
+      const mode = form.get('mode');
+      if (mode !== 'demo' && mode !== 'live') return send(res, 400, 'Bad mode', { 'Content-Type': 'text/plain' });
+      const error = setDemoMode(mode === 'demo');
+      if (error) return send(res, 400, renderTransactions({ ok: false, message: error }), ADMIN_HEADERS);
+      return send(res, 303, undefined, { Location: `/adminpanel?mode=${mode}` });
+    }
     if (pathname === '/adminpanel/line' && method === 'POST') {
       if (!isAdmin(req)) return send(res, 303, undefined, { Location: '/adminpanel' });
       let form;
@@ -369,6 +538,7 @@ ${flash ? `<p class="flash ${flash.ok ? 'ok' : 'error'}">${escapeHtml(flash.mess
       store.set(result.text);
       transactions.add({
         id: `admin_${Date.now().toString(36)}`,
+        slug: store.get().slug,
         status: 'admin',
         text: result.text,
         amount: 0,
@@ -402,6 +572,15 @@ ${flash ? `<p class="flash ${flash.ok ? 'ok' : 'error'}">${escapeHtml(flash.mess
       if (method === 'GET' && pathname === '/api/events') return handleEvents(req, res);
       if (method === 'POST' && pathname === '/api/checkout') return await handleCheckout(req, res);
       if (method === 'POST' && pathname === '/api/stripe/webhook') return await handleWebhook(req, res);
+      const slugMatch = (method === 'GET' || method === 'HEAD') && SLUG_RE.exec(pathname);
+      if (slugMatch) {
+        const tx = transactions.bySlug(slugMatch[1]);
+        if (!tx) return send(res, 404, 'Line not found', { 'Content-Type': 'text/plain; charset=utf-8' });
+        return send(res, 200, method === 'HEAD' ? undefined : renderLinePage(tx), {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-cache',
+        });
+      }
       if (pathname === '/adminpanel' || pathname.startsWith('/adminpanel/')) {
         return await handleAdmin(req, res, pathname, method);
       }

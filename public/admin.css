@@ -117,3 +117,23 @@ td.empty { text-align: center; color: var(--muted); padding: 32px; }
 .flash.ok { background: var(--ok-bg); color: var(--ok); }
 .flash.error { background: var(--warn-bg); color: var(--warn); }
 .s-admin { background: var(--demo-bg); color: var(--demo); }
+.mode {
+  max-width: 1200px;
+  margin: 16px auto;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  border-radius: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.mode h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 4px; }
+.mode-state { margin: 0; }
+.mode.is-demo { background: var(--demo-bg); border-color: transparent; }
+.mode.is-demo strong { color: var(--demo); }
+.mode.is-live strong { color: var(--ok); }
+.mode button:disabled { opacity: .5; cursor: not-allowed; }
+td.link a { font-family: ui-monospace, monospace; font-size: 12px; color: var(--accent); }
