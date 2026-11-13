@@ -47,7 +47,7 @@ jobs:
             StrictHostKeyChecking yes
           CFG
 
-      - name: Upload files
+      - name: Resolve deploy path
         run: |
           # Expand a leading "~" to the remote home directory.
           case "$DEPLOY_PATH" in
@@ -55,25 +55,59 @@ jobs:
           esac
           echo "DEPLOY_PATH=$DEPLOY_PATH" >> "$GITHUB_ENV"
           echo "Deploying to $DEPLOY_PATH"
-          ssh target "mkdir -p '$DEPLOY_PATH'"
-          rsync -az --delete \
-            --exclude '.git/' --exclude '.github/' --exclude 'test/' \
-            --exclude '.env*' --exclude 'node_modules/' \
-            ./ "target:$DEPLOY_PATH/"
+          ssh target "mkdir -p '$DEPLOY_PATH' && test -f '$DEPLOY_PATH/.env'" \
+            || { echo "Missing $DEPLOY_PATH/.env on server" >&2; exit 1; }
+
+      # The image is built here, not on the server: the instance is too small
+      # (512 MB RAM, burstable CPU) to run docker build reliably.
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: buckline:latest
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Upload image
+        run: |
+          # Rotate: the running "latest" becomes "previous" (kept for rollback).
+          ssh target 'docker image inspect buckline:latest >/dev/null 2>&1 && docker tag buckline:latest buckline:previous || true'
+          docker save buckline:latest | gzip -1 | ssh target 'gunzip | docker load'
+
+      - name: Upload config files
+        run: |
+          rsync -az --relative docker-compose.yml nginx/ scripts/ "target:$DEPLOY_PATH/"
 
       - name: Restart service
         run: |
-          ssh target "cd '$DEPLOY_PATH' && { test -f .env || { echo 'Missing $DEPLOY_PATH/.env on server' >&2; exit 1; }; } && docker compose up -d --build --remove-orphans && docker image prune -f"
+          ssh target "cd '$DEPLOY_PATH' && docker compose up -d --no-build --remove-orphans"
 
       - name: Health check
+        id: health
         run: |
-          for i in $(seq 1 15); do
+          for i in $(seq 1 20); do
             if ssh target "wget -qO- http://127.0.0.1:3000/healthz" >/dev/null 2>&1; then
               echo "Healthy"; exit 0
             fi
-            sleep 4
+            sleep 3
           done
-          echo "Health check failed"; ssh target "cd '$DEPLOY_PATH' && docker compose logs --tail=100"; exit 1
+          echo "Health check failed"; ssh target "cd '$DEPLOY_PATH' && docker compose logs --tail=100 buckline"; exit 1
+
+      - name: Roll back to previous image
+        if: failure() && steps.health.conclusion == 'failure'
+        run: ssh target "cd '$DEPLOY_PATH' && sh scripts/rollback.sh"
+
+      - name: Prune old images
+        if: success()
+        run: |
+          # Keep only buckline:latest and buckline:previous. Older builds lost
+          # their tags during rotation and are now dangling, so prune removes them.
+          ssh target 'docker image prune -f >/dev/null && docker images buckline --format "{{.Repository}}:{{.Tag}}  {{.ID}}  {{.CreatedSince}}"'
 
       - name: Cleanup
         if: always()

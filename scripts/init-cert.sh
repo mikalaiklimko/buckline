@@ -13,4 +13,4 @@ docker compose stop nginx 2>/dev/null || true
 docker compose run --rm --no-deps -p 80:80 --entrypoint certbot certbot \
   certonly --standalone -d "$DOMAIN" $ACCOUNT --agree-tos --non-interactive
 
-docker compose up -d --build
+docker compose up -d --no-build
