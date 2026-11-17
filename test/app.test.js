@@ -404,3 +404,28 @@ test('admin can switch between demo and live mode, and it persists', async () =>
   const restarted = createApp(opts);
   assert.equal(restarted.config.demoMode, true, 'mode survives restart');
 });
+
+test('Google Analytics is loaded from our origin and allowed by the CSP', async () => {
+  const on = createApp({ dataFile: tmpFile(), demoMode: true, gaMeasurementId: 'G-63V8H5EP16' });
+  const off = createApp({ dataFile: tmpFile(), demoMode: true, gaMeasurementId: '' });
+  const onBase = await listen(on);
+  const offBase = await listen(off);
+  try {
+    const js = await fetch(onBase + '/ga.js');
+    assert.match(js.headers.get('content-type'), /javascript/);
+    const body = await js.text();
+    assert.match(body, /G-63V8H5EP16/);
+    assert.match(body, /googletagmanager\.com\/gtag\/js/);
+
+    const home = await fetch(onBase + '/');
+    assert.match(await home.text(), /<script src="\/ga\.js" async><\/script>/);
+    const csp = home.headers.get('content-security-policy');
+    assert.match(csp, /script-src 'self' https:\/\/www\.googletagmanager\.com/);
+    assert.match(csp, /connect-src[^;]*google-analytics\.com/);
+
+    assert.match(await (await fetch(offBase + '/ga.js')).text(), /analytics disabled/);
+  } finally {
+    await close(on);
+    await close(off);
+  }
+});

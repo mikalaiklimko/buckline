@@ -30,8 +30,11 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Content-Security-Policy':
-    "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; " +
-    "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "default-src 'self'; script-src 'self' https://www.googletagmanager.com; " +
+    "style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; " +
+    "img-src 'self' data: https://*.google-analytics.com https://*.googletagmanager.com; " +
+    "connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; " +
+    "frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 };
 
 /** Content hash of a public file, used as ?v= so browsers fetch updates right away. */
@@ -210,6 +213,8 @@ function createApp(overrides = {}) {
     return indexTemplate
       .replaceAll('{{TEXT}}', escapeHtml(text))
       .replaceAll('{{PRICE}}', escapeHtml(formatPrice()))
+      .replaceAll('{{AMOUNT}}', String(config.priceCents / 100))
+      .replaceAll('{{CURRENCY}}', escapeHtml(config.currency.toUpperCase()))
       .replaceAll('{{MAX_LENGTH}}', String(config.maxLength))
       .replaceAll('{{DEMO}}', config.demoMode ? 'true' : 'false');
   }
@@ -330,6 +335,27 @@ function createApp(overrides = {}) {
     return sendJson(res, 200, { slug: tx.slug, current: store.get().slug === tx.slug });
   }
 
+  /**
+   * Google Analytics bootstrap. Served from our origin because the CSP blocks
+   * inline scripts; it loads gtag.js and configures the measurement ID.
+   */
+  function serveAnalytics(res) {
+    const id = /^G-[A-Z0-9]{4,20}$/.test(config.gaMeasurementId) ? config.gaMeasurementId : '';
+    const body = id
+      ? `(function(){var id=${JSON.stringify(id)};` +
+        `window.dataLayer=window.dataLayer||[];` +
+        `window.gtag=function(){dataLayer.push(arguments);};` +
+        `gtag('js',new Date());gtag('config',id);` +
+        `var s=document.createElement('script');s.async=true;` +
+        `s.src='https://www.googletagmanager.com/gtag/js?id='+encodeURIComponent(id);` +
+        `document.head.appendChild(s);})();\n`
+      : '/* analytics disabled */\n';
+    return send(res, 200, body, {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': 'public, max-age=300',
+    });
+  }
+
   function handleEvents(req, res) {
     res.writeHead(200, {
       ...SECURITY_HEADERS,
@@ -409,6 +435,7 @@ function createApp(overrides = {}) {
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap">
   <link rel="stylesheet" href="${ASSET.css}">
+  <script src="/ga.js" async></script>
 </head>
 <body>
   <div class="page">
@@ -609,6 +636,7 @@ ${flash ? `<p class="flash ${flash.ok ? 'ok' : 'error'}">${escapeHtml(flash.mess
           'Cache-Control': 'no-store',
         });
       }
+      if (method === 'GET' && pathname === '/ga.js') return serveAnalytics(res);
       if (method === 'GET' && pathname === '/healthz') return sendJson(res, 200, { ok: true });
       if (method === 'GET' && pathname === '/api/line') return sendJson(res, 200, publicState());
       if (method === 'GET' && pathname === '/api/my-line') return handleMyLine(req, res);

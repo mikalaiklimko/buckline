@@ -2,6 +2,10 @@
   'use strict';
 
   const $ = (id) => document.getElementById(id);
+  // Google Analytics event, if analytics loaded (blockers may prevent it).
+  const track = (name, params) => {
+    try { if (typeof window.gtag === 'function') window.gtag('event', name, params || {}); } catch { /* ignore */ }
+  };
   const maxLength = Number(document.body.dataset.maxLength) || 80;
 
   const line = $('line');
@@ -44,6 +48,10 @@
   const shareBtn = $('share-btn');
   const shareNote = $('share-note');
   const price = document.body.dataset.price || '$1';
+  const money = {
+    currency: document.body.dataset.currency || 'USD',
+    value: Number(document.body.dataset.amount) || 1,
+  };
   let myLink = null;
 
   // One is picked at random each time the buyer shares.
@@ -79,6 +87,7 @@
         if (current || slug === currentSlug) {
           $('paid-msg').textContent = 'The line is yours. For now.';
           showShare(slug);
+          track('purchase', { transaction_id: sessionId, ...money });
         }
         return;
       }
@@ -103,6 +112,7 @@
     if (navigator.share) {
       try {
         await navigator.share({ title: 'OneBuckLine', text, url: myLink });
+        track('share', { method: 'share_sheet', content_type: 'line' });
         return;
       } catch (err) {
         if (err && err.name === 'AbortError') return; // user closed the share sheet
@@ -110,6 +120,7 @@
     }
     try {
       await navigator.clipboard.writeText(`${text} ${myLink}`);
+      track('share', { method: 'copy_link', content_type: 'line' });
       shareNote.textContent = 'Copied. Paste it anywhere.';
     } catch {
       shareNote.textContent = myLink;
@@ -152,6 +163,7 @@
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.url) throw new Error(data.error || 'Could not start checkout.');
+      track('begin_checkout', money);
       window.location.assign(data.url);
     } catch (err) {
       showError(err.message);

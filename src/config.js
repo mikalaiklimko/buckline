@@ -29,6 +29,8 @@ const config = {
   // Admin panel at /adminpanel. Disabled unless ADMIN_PASSWORD is set.
   adminUser: process.env.ADMIN_USER || 'admin',
   adminPassword: process.env.ADMIN_PASSWORD || '',
+  // Google Analytics 4 measurement ID. Set GA_MEASUREMENT_ID= (empty) to turn analytics off.
+  gaMeasurementId: process.env.GA_MEASUREMENT_ID ?? 'G-63V8H5EP16',
   trustProxy: process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true',
 };
 

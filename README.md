@@ -71,6 +71,7 @@ The line changes only when the webhook arrives, never on the redirect, so nobody
 | `PRICE_CENTS` | `100` | Price per change |
 | `CURRENCY` | `usd` | Checkout currency |
 | `MAX_LENGTH` | `80` | Max characters |
+| `GA_MEASUREMENT_ID` | `G-63V8H5EP16` | Google Analytics 4 ID; empty = analytics off |
 | `ADMIN_USER` | `admin` | Admin panel login |
 | `ADMIN_PASSWORD` | — | Admin panel password; empty = `/adminpanel` disabled |
 | `TRANSACTIONS_FILE` | next to `DATA_FILE` | Transaction log (JSON Lines) |
